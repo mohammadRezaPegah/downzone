@@ -28,6 +28,32 @@ success() { echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS: $1${RESET}"
 warning() { echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: $1${RESET}"; }
 error()   { echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1${RESET}" >&2; }
 
+# ---------- Prevent system sleep (cross-platform) ----------
+PREVENT_SLEEP_PID=""
+
+start_prevent_sleep() {
+    if command -v caffeinate >/dev/null 2>&1; then
+        info "Preventing system sleep (macOS - caffeinate)"
+        caffeinate -dims &
+        PREVENT_SLEEP_PID=$!
+    elif command -v systemd-inhibit >/dev/null 2>&1; then
+        info "Preventing system sleep (Linux - systemd-inhibit)"
+        systemd-inhibit --what=sleep --why="Downzone downloads" bash -c "sleep infinity" &
+        PREVENT_SLEEP_PID=$!
+    else
+        warning "No sleep prevention tool found. System may go to sleep."
+    fi
+}
+
+stop_prevent_sleep() {
+    if [ -n "$PREVENT_SLEEP_PID" ]; then
+        kill "$PREVENT_SLEEP_PID" >/dev/null 2>&1
+        success "System sleep behavior restored"
+    fi
+}
+
+trap stop_prevent_sleep EXIT INT TERM
+
 # ---------- Timezone selection ----------
 TIMEZONES=(
   "Asia/Tehran"
@@ -62,126 +88,99 @@ done
 export TZ="$TIMEZONE"
 info "Timezone set to $TIMEZONE"
 
-# ---------- Download directory selection ----------
+# ---------- Download directory ----------
 while true; do
     read -rp "Enter download directory [default: $DEFAULT_DOWNLOAD_DIR]: " DOWNLOAD_DIR
     DOWNLOAD_DIR="${DOWNLOAD_DIR:-$DEFAULT_DOWNLOAD_DIR}"
     DOWNLOAD_DIR="${DOWNLOAD_DIR/#\~/$HOME}"
 
     if [ ! -d "$DOWNLOAD_DIR" ]; then
-        warning "Directory does not exist. Create it? (y/n): "
-        read -r CREATE_DIR
-        if [[ "$CREATE_DIR" =~ ^[Yy]$ ]]; then
-            mkdir -p "$DOWNLOAD_DIR" || { error "Failed to create directory"; continue; }
-        else
-            continue
-        fi
+        read -rp "Directory does not exist. Create it? (y/n): " CREATE
+        [[ "$CREATE" =~ ^[Yy]$ ]] && mkdir -p "$DOWNLOAD_DIR" || continue
     fi
 
-    if [ ! -w "$DOWNLOAD_DIR" ]; then
-        error "Directory is not writable: $DOWNLOAD_DIR"
-        continue
-    fi
-
-    break
+    [ -w "$DOWNLOAD_DIR" ] && break
+    error "Directory is not writable"
 done
 
 info "Download directory set to: $DOWNLOAD_DIR"
 
-# ---------- Ask for links file ----------
+# ---------- Links file ----------
 while true; do
     read -rp "Enter full path to links file: " LINKS_FILE
     LINKS_FILE="${LINKS_FILE/#\~/$HOME}"
-
-    if [ -f "$LINKS_FILE" ]; then
-        info "Using links file: $LINKS_FILE"
-        break
-    else
-        error "Links file not found: $LINKS_FILE"
-    fi
+    [ -f "$LINKS_FILE" ] && break
+    error "Links file not found"
 done
 
-# ---------- Ask for start & end time ----------
+# ---------- Time input ----------
 TIME_REGEX='^([01]?[0-9]|2[0-3]):[0-5][0-9]$'
 
 while true; do
     read -rp "Enter START time (HH:MM) [default: $DEFAULT_START_TIME]: " START_TIME
     START_TIME=${START_TIME:-$DEFAULT_START_TIME}
     [[ "$START_TIME" =~ $TIME_REGEX ]] && break
-    error "Invalid START time format"
+    error "Invalid START time"
 done
 
 while true; do
-    read -rp "Enter END time   (HH:MM) [default: $DEFAULT_END_TIME]: " END_TIME
+    read -rp "Enter END time (HH:MM) [default: $DEFAULT_END_TIME]: " END_TIME
     END_TIME=${END_TIME:-$DEFAULT_END_TIME}
     [[ "$END_TIME" =~ $TIME_REGEX ]] && break
-    error "Invalid END time format"
+    error "Invalid END time"
 done
 
 info "Download window: $START_TIME → $END_TIME ($TIMEZONE)"
 
-# ---------- Time calculation (macOS compatible) ----------
+# ---------- Time calculation ----------
 now_ts=$(date +%s)
-start_ts=$(date -j -f "%H:%M" "$START_TIME" "+%s")
-end_ts=$(date -j -f "%H:%M" "$END_TIME" "+%s")
 
-if [ "$start_ts" -le "$now_ts" ]; then
-  start_ts=$(date -j -v+1d -f "%H:%M" "$START_TIME" "+%s")
-  end_ts=$(date -j -v+1d -f "%H:%M" "$END_TIME" "+%s")
+if date -j >/dev/null 2>&1; then
+    start_ts=$(date -j -f "%H:%M" "$START_TIME" "+%s")
+    end_ts=$(date -j -f "%H:%M" "$END_TIME" "+%s")
+else
+    start_ts=$(date -d "$START_TIME" +%s)
+    end_ts=$(date -d "$END_TIME" +%s)
 fi
+
+[ "$start_ts" -le "$now_ts" ] && {
+    start_ts=$((start_ts + 86400))
+    end_ts=$((end_ts + 86400))
+}
 
 sleep_seconds=$((start_ts - now_ts))
 
-info "Script started"
 info "Waiting until $START_TIME..."
+start_prevent_sleep
 sleep "$sleep_seconds"
 
 info "Download window opened"
-cd "$DOWNLOAD_DIR" || { error "Cannot access $DOWNLOAD_DIR"; exit 1; }
+cd "$DOWNLOAD_DIR" || exit 1
 
 # ---------- Download loop ----------
 while IFS= read -r url || [ -n "$url" ]; do
+    [[ -z "$url" || "$url" =~ ^[[:space:]]*# ]] && continue
 
-  [[ -z "$url" ]] && continue
-  [[ "$url" =~ ^[[:space:]]*# ]] && continue
+    [ "$(date +%s)" -ge "$end_ts" ] && break
 
-  current_ts=$(date +%s)
-  if [ "$current_ts" -ge "$end_ts" ]; then
-    warning "End time reached. Stopping downloads."
-    break
-  fi
+    filename=$(basename "${url%%\?*}")
+    info "Downloading: $filename"
 
-  filename=$(basename "${url%%\?*}")
-  info "Starting download: $filename"
+    attempt=1
+    while [ "$attempt" -le "$MAX_RETRIES" ]; do
+        curl -L -C - --progress-bar --fail \
+             --connect-timeout "$CONNECT_TIMEOUT" \
+             --max-time "$MAX_TIME" \
+             -O "$url" && {
+             success "Downloaded: $filename"
+             success "Saved to: $DOWNLOAD_DIR/$filename"
+             break
+        }
 
-  attempt=1
-  success_flag=false
-
-  while [ "$attempt" -le "$MAX_RETRIES" ]; do
-    info "Attempt $attempt of $MAX_RETRIES"
-
-    curl -L \
-         -C - \
-         --progress-bar \
-         --fail \
-         --connect-timeout "$CONNECT_TIMEOUT" \
-         --max-time "$MAX_TIME" \
-         -O "$url"
-
-    if [ $? -eq 0 ]; then
-      success "Download completed: $filename"
-      success "Saved to: $DOWNLOAD_DIR/$filename"
-      success_flag=true
-      break
-    else
-      error "Download failed for $filename"
-      attempt=$((attempt + 1))
-      sleep 3
-    fi
-  done
-
-  [ "$success_flag" = false ] && warning "Skipping $filename"
-
+        warning "Retry $attempt failed"
+        attempt=$((attempt + 1))
+        sleep 3
+    done
 done < "$LINKS_FILE"
 
 success "Download session finished"
