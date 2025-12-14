@@ -3,6 +3,8 @@
 **Downzone** is a command-line downloader designed for macOS and Linux that allows you to schedule and manage downloads with ease. It features:
 
 - Dynamic timezone selection
+- Custom Download Directory
+- Sleep Prevention
 - Custom start and end times
 - Sequential downloads from a list of URLs
 - Resume support for interrupted downloads
@@ -10,17 +12,23 @@
 - Colored and informative messages (Info, Success, Warning, Error)
 - Interactive validation of links file
 - Progress display for each download
+- ASCII Downzone
 
 ---
 
 ## Features
 
-1. **Timezone Selection:** Choose your timezone from a predefined list before starting downloads.  
-2. **Start & End Time:** Set the download window dynamically; the script will wait until the start time and stop automatically at the end time.  
-3. **Links File:** Provide a text file (`links.txt`) containing all URLs to download. The script validates the file path interactively.  
-4. **Resume & Retry:** Downloads are resumable and will retry up to 3 times if a failure occurs.  
-5. **Progress & Messages:** Download progress is shown in the terminal along with colored status messages.  
-6. **Safe Execution:** The script will **never stop** due to individual download failures and will continue to the next link.  
+1. **Timezone Selection:** Choose your timezone from a predefined list before starting downloads.
+2. **Custom Download Directory:** Choose any destination directory (e.g. external hard drive) instead of the default `~/Downloads`.
+3. **Sleep Prevention:** Prevents macOS and Linux systems from entering sleep mode during waiting and download periods.
+- On macOS, caffeinate is used.
+- On Linux, systemd-inhibit is used if available.
+4. **Start & End Time:** Set the download window dynamically; the script will wait until the start time and stop automatically at the end time.  
+5. **Links File:** Provide a text file (`links.txt`) containing all URLs to download. The script validates the file path interactively.  
+6. **Resume & Retry:** Downloads are resumable and will retry up to 3 times if a failure occurs.  
+7. **Progress & Messages:** Download progress is shown in the terminal along with colored status messages.  
+8. **Safe Execution:** The script will **never stop** due to individual download failures and will continue to the next link.  
+9. **ASCII Banner:** Displays a large DOWNZONE banner with license and copyright information at startup.
 
 ---
 
@@ -29,8 +37,8 @@
 1. **Clone or download the repository:**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/downzone-package.git
-cd downzone-package
+git clone https://github.com/mohammadRezaPegah/downzone.git
+cd downzone
 ```
 
 2. **Run installer:**
@@ -50,10 +58,11 @@ downzone
 ### The script will prompt you for:
 
 1. Timezone selection – Choose from a list.
-2. Links file path – Enter the full path to your links.txt. The script will verify the file exists.
-3. Start and end times – Enter the download window in HH:MM format.
+2. Download Directory selection - The script will ask where to save downloaded files. Press Enter to use ~/Downloads or enter a custom path (including external drives)
+3. Links file path – Enter the full path to your links.txt. The script will verify the file exists.
+4. Start and end times – Enter the download window in HH:MM format.
 #
-The script will then begin downloading all links sequentially into your ~/Downloads folder. It will show download progress, retries for failed links, and colored messages for all operations.
+The script will then wait until the specified start time, prevent the system from sleeping, and download all links sequentially into the selected directory. It will show download progress, retries for failed links, and colored messages for all operations.
 
 ### Links File Format
 
@@ -103,6 +112,8 @@ Downzone is distributed under a Dual License:
 
 - Once obtained, you are allowed to distribute or include Downzone in a commercial product according to the commercial license.
 
+**See LICENSE file for full dual-license terms.**
+
 
 ### Disclaimer
 This software is provided "AS IS", without warranty of any kind. The author is not responsible for any damage or loss arising from the use of this software.
@@ -113,10 +124,3 @@ This software is provided "AS IS", without warranty of any kind. The author is n
 Feel free to fork the repository, submit issues, or create pull requests for personal or non-commercial use. Make sure to keep the script executable permissions intact.  
 
 **Note:** Commercial use of this software requires a separate license. Contact the copyright holder at `miladpersonal1999@gmail.com` for commercial licensing.
-
-
-### License
-This project is licensed under a Dual License:
-
-- **Non-Commercial / Personal Use:** Free to use, modify, and distribute for personal or non-commercial purposes.  
-- **Commercial Use:** Requires a separate commercial license. Contact `miladpersonal1999@gmail.com` to obtain a license.
