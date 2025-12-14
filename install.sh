@@ -11,6 +11,25 @@
 # Downzone Installer
 # =========================================
 
+# ---------- Banner ----------
+print_banner() {
+cat << "EOF"
+
+▄ ▄▖▖  ▖▖ ▖  ▄▖▄▖▖ ▖▄▖  ▄▖▖ ▖▄▖▄▖▄▖▖ ▖ ▄▖▄▖
+▌▌▌▌▌▞▖▌▛▖▌  ▗▘▌▌▛▖▌▙▖  ▐ ▛▖▌▚ ▐ ▌▌▌ ▌ ▙▖▙▘
+▙▘▙▌▛ ▝▌▌▝▌  ▙▖▙▌▌▝▌▙▖  ▟▖▌▝▌▄▌▐ ▛▌▙▖▙▖▙▖▌▌
+
+Version 1.0.0
+Downzone - Dual License
+Copyright (c) 2025 Mohammad Reza Pegah
+
+EOF
+echo -e "${RESET}"
+}
+
+clear
+print_banner
+
 if [[ $EUID -ne 0 ]]; then
    echo "This installer must be run as root. Use sudo ./install.sh"
    exit 1

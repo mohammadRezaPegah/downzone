@@ -28,27 +28,50 @@ success() { echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS: $1${RESET}"
 warning() { echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: $1${RESET}"; }
 error()   { echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1${RESET}" >&2; }
 
-# ---------- Prevent system sleep (cross-platform) ----------
+# ---------- Banner ----------
+print_banner() {
+echo -e "${GREEN}"
+cat << "EOF"
+
+██████╗  ██████╗ ██╗    ██╗███╗   ██╗    ███████╗ ██████╗ ███╗   ██╗███████╗
+██╔══██╗██╔═══██╗██║    ██║████╗  ██║    ╚══███╔╝██╔═══██╗████╗  ██║██╔════╝
+██║  ██║██║   ██║██║ █╗ ██║██╔██╗ ██║      ███╔╝ ██║   ██║██╔██╗ ██║█████╗  
+██║  ██║██║   ██║██║███╗██║██║╚██╗██║     ███╔╝  ██║   ██║██║╚██╗██║██╔══╝  
+██████╔╝╚██████╔╝╚███╔███╔╝██║ ╚████║    ███████╗╚██████╔╝██║ ╚████║███████╗
+╚═════╝  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝    ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
+
+Version 1.0.0
+Downzone - Dual License
+Copyright (c) 2025 Mohammad Reza Pegah
+
+EOF
+echo -e "${RESET}"
+}
+
+clear
+print_banner
+
+# ---------- Prevent system sleep ----------
 PREVENT_SLEEP_PID=""
 
 start_prevent_sleep() {
     if command -v caffeinate >/dev/null 2>&1; then
-        info "Preventing system sleep (macOS - caffeinate)"
+        info "Preventing system sleep (macOS)"
         caffeinate -dims &
         PREVENT_SLEEP_PID=$!
     elif command -v systemd-inhibit >/dev/null 2>&1; then
-        info "Preventing system sleep (Linux - systemd-inhibit)"
+        info "Preventing system sleep (Linux)"
         systemd-inhibit --what=sleep --why="Downzone downloads" bash -c "sleep infinity" &
         PREVENT_SLEEP_PID=$!
     else
-        warning "No sleep prevention tool found. System may go to sleep."
+        warning "Sleep prevention not supported on this system"
     fi
 }
 
 stop_prevent_sleep() {
     if [ -n "$PREVENT_SLEEP_PID" ]; then
         kill "$PREVENT_SLEEP_PID" >/dev/null 2>&1
-        success "System sleep behavior restored"
+        success "System sleep restored"
     fi
 }
 
@@ -120,14 +143,14 @@ while true; do
     read -rp "Enter START time (HH:MM) [default: $DEFAULT_START_TIME]: " START_TIME
     START_TIME=${START_TIME:-$DEFAULT_START_TIME}
     [[ "$START_TIME" =~ $TIME_REGEX ]] && break
-    error "Invalid START time"
+    error "Invalid START time format"
 done
 
 while true; do
     read -rp "Enter END time (HH:MM) [default: $DEFAULT_END_TIME]: " END_TIME
     END_TIME=${END_TIME:-$DEFAULT_END_TIME}
     [[ "$END_TIME" =~ $TIME_REGEX ]] && break
-    error "Invalid END time"
+    error "Invalid END time format"
 done
 
 info "Download window: $START_TIME → $END_TIME ($TIMEZONE)"
@@ -160,7 +183,6 @@ cd "$DOWNLOAD_DIR" || exit 1
 # ---------- Download loop ----------
 while IFS= read -r url || [ -n "$url" ]; do
     [[ -z "$url" || "$url" =~ ^[[:space:]]*# ]] && continue
-
     [ "$(date +%s)" -ge "$end_ts" ] && break
 
     filename=$(basename "${url%%\?*}")
