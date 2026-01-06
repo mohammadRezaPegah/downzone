@@ -14,6 +14,9 @@ DEFAULT_DOWNLOAD_DIR="$HOME/Downloads"
 MAX_RETRIES=3
 CONNECT_TIMEOUT=20
 MAX_TIME=0
+
+KEEP_ALIVE_INTERVAL=10
+PING_TARGET="1.1.1.1"
 # =========================================================
 
 # ---------- Color codes ----------
@@ -69,13 +72,30 @@ start_prevent_sleep() {
 }
 
 stop_prevent_sleep() {
-    if [ -n "$PREVENT_SLEEP_PID" ]; then
-        kill "$PREVENT_SLEEP_PID" >/dev/null 2>&1
-        success "System sleep restored"
+    [ -n "$PREVENT_SLEEP_PID" ] && kill "$PREVENT_SLEEP_PID" 2>/dev/null
+}
+trap stop_prevent_sleep EXIT INT TERM
+
+# ---------- Internet check (silent & smart) ----------
+INTERNET_STATUS="unknown"
+
+check_internet_silent() {
+    if ping -c 1 -W 2 "$PING_TARGET" >/dev/null 2>&1; then
+        if [ "$INTERNET_STATUS" != "online" ]; then
+            if [ "$INTERNET_STATUS" != "unknown" ]; then
+                success "Internet connection restored"
+            fi
+            INTERNET_STATUS="online"
+        fi
+        return 0
+    else
+        if [ "$INTERNET_STATUS" != "offline" ]; then
+            error "Internet connection lost. Waiting..."
+            INTERNET_STATUS="offline"
+        fi
+        return 1
     fi
 }
-
-trap stop_prevent_sleep EXIT INT TERM
 
 # ---------- Timezone selection ----------
 TIMEZONES=(
@@ -96,16 +116,11 @@ while true; do
   done
 
   read -rp "Enter timezone number [default: Asia/Tehran]: " TZ_CHOICE
-
-  if [[ -z "$TZ_CHOICE" ]]; then
-    TIMEZONE="$DEFAULT_TIMEZONE"
-    break
-  elif [[ "$TZ_CHOICE" =~ ^[0-9]+$ ]] && (( TZ_CHOICE >= 1 && TZ_CHOICE <= ${#TIMEZONES[@]} )); then
-    TIMEZONE="${TIMEZONES[$((TZ_CHOICE-1))]}"
-    break
-  else
-    error "Invalid timezone selection"
-  fi
+  [[ -z "$TZ_CHOICE" ]] && TIMEZONE="$DEFAULT_TIMEZONE" && break
+  [[ "$TZ_CHOICE" =~ ^[0-9]+$ ]] && ((TZ_CHOICE>=1 && TZ_CHOICE<=${#TIMEZONES[@]})) && {
+    TIMEZONE="${TIMEZONES[$((TZ_CHOICE-1))]}"; break;
+  }
+  error "Invalid timezone selection"
 done
 
 export TZ="$TIMEZONE"
@@ -118,8 +133,8 @@ while true; do
     DOWNLOAD_DIR="${DOWNLOAD_DIR/#\~/$HOME}"
 
     if [ ! -d "$DOWNLOAD_DIR" ]; then
-        read -rp "Directory does not exist. Create it? (y/n): " CREATE
-        [[ "$CREATE" =~ ^[Yy]$ ]] && mkdir -p "$DOWNLOAD_DIR" || continue
+        read -rp "Directory does not exist. Create it? (y/n): " C
+        [[ "$C" =~ ^[Yy]$ ]] && mkdir -p "$DOWNLOAD_DIR" || continue
     fi
 
     [ -w "$DOWNLOAD_DIR" ] && break
@@ -157,7 +172,6 @@ info "Download window: $START_TIME → $END_TIME ($TIMEZONE)"
 
 # ---------- Time calculation ----------
 now_ts=$(date +%s)
-
 if date -j >/dev/null 2>&1; then
     start_ts=$(date -j -f "%H:%M" "$START_TIME" "+%s")
     end_ts=$(date -j -f "%H:%M" "$END_TIME" "+%s")
@@ -175,7 +189,16 @@ sleep_seconds=$((start_ts - now_ts))
 
 info "Waiting until $START_TIME..."
 start_prevent_sleep
-sleep "$sleep_seconds"
+
+while [ "$sleep_seconds" -gt 0 ]; do
+    check_internet_silent
+    sleep "$KEEP_ALIVE_INTERVAL"
+    sleep_seconds=$((sleep_seconds - KEEP_ALIVE_INTERVAL))
+done
+
+until check_internet_silent; do
+    sleep "$KEEP_ALIVE_INTERVAL"
+done
 
 info "Download window opened"
 cd "$DOWNLOAD_DIR" || exit 1
@@ -184,6 +207,10 @@ cd "$DOWNLOAD_DIR" || exit 1
 while IFS= read -r url || [ -n "$url" ]; do
     [[ -z "$url" || "$url" =~ ^[[:space:]]*# ]] && continue
     [ "$(date +%s)" -ge "$end_ts" ] && break
+
+    until check_internet_silent; do
+        sleep "$KEEP_ALIVE_INTERVAL"
+    done
 
     filename=$(basename "${url%%\?*}")
     info "Downloading: $filename"
@@ -198,7 +225,6 @@ while IFS= read -r url || [ -n "$url" ]; do
              success "Saved to: $DOWNLOAD_DIR/$filename"
              break
         }
-
         warning "Retry $attempt failed"
         attempt=$((attempt + 1))
         sleep 3
