@@ -26,6 +26,25 @@ YELLOW="\033[33m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
+safe_sleep() {
+    local duration=$1
+    local elapsed=0
+
+    while [ "$elapsed" -lt "$duration" ]; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+}
+
+safe_read() {
+    read -rp "$1" "$2" || {
+        echo
+        warning "Input cancelled (EOF). Exiting..."
+        stop_prevent_sleep
+        exit 0
+    }
+}
+
 info()    { echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] INFO: $1${RESET}"; }
 success() { echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS: $1${RESET}"; }
 warning() { echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: $1${RESET}"; }
@@ -43,13 +62,19 @@ cat << "EOF"
 ██████╔╝╚██████╔╝╚███╔███╔╝██║ ╚████║    ███████╗╚██████╔╝██║ ╚████║███████╗
 ╚═════╝  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝    ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
 
-Version 1.0.0
+Version 1.1.0
 Downzone - Dual License
 Copyright (c) 2025 Mohammad Reza Pegah
 
 EOF
 echo -e "${RESET}"
 }
+
+# ---------- Version flag ----------
+if [[ "$1" == "-v" || "$1" == "--version" ]]; then
+    print_banner
+    exit 0
+fi
 
 clear
 print_banner
@@ -74,7 +99,16 @@ start_prevent_sleep() {
 stop_prevent_sleep() {
     [ -n "$PREVENT_SLEEP_PID" ] && kill "$PREVENT_SLEEP_PID" 2>/dev/null
 }
-trap stop_prevent_sleep EXIT INT TERM
+
+graceful_exit() {
+    echo
+    warning "Interrupted by user (Ctrl+C). Exiting..."
+    stop_prevent_sleep
+    exit 130
+}
+
+trap graceful_exit INT
+trap stop_prevent_sleep EXIT TERM
 
 # ---------- Internet check (silent & smart) ----------
 INTERNET_STATUS="unknown"
@@ -115,7 +149,7 @@ while true; do
     printf "%2d) %s\n" "$((i+1))" "${TIMEZONES[$i]}"
   done
 
-  read -rp "Enter timezone number [default: Asia/Tehran]: " TZ_CHOICE
+  safe_read "Enter timezone number [default: Asia/Tehran]: " TZ_CHOICE
   [[ -z "$TZ_CHOICE" ]] && TIMEZONE="$DEFAULT_TIMEZONE" && break
   [[ "$TZ_CHOICE" =~ ^[0-9]+$ ]] && ((TZ_CHOICE>=1 && TZ_CHOICE<=${#TIMEZONES[@]})) && {
     TIMEZONE="${TIMEZONES[$((TZ_CHOICE-1))]}"; break;
@@ -128,12 +162,12 @@ info "Timezone set to $TIMEZONE"
 
 # ---------- Download directory ----------
 while true; do
-    read -rp "Enter download directory [default: $DEFAULT_DOWNLOAD_DIR]: " DOWNLOAD_DIR
+    safe_read "Enter download directory [default: $DEFAULT_DOWNLOAD_DIR]: " DOWNLOAD_DIR
     DOWNLOAD_DIR="${DOWNLOAD_DIR:-$DEFAULT_DOWNLOAD_DIR}"
     DOWNLOAD_DIR="${DOWNLOAD_DIR/#\~/$HOME}"
 
     if [ ! -d "$DOWNLOAD_DIR" ]; then
-        read -rp "Directory does not exist. Create it? (y/n): " C
+        safe_read "Directory does not exist. Create it? (y/n): " C
         [[ "$C" =~ ^[Yy]$ ]] && mkdir -p "$DOWNLOAD_DIR" || continue
     fi
 
@@ -145,7 +179,7 @@ info "Download directory set to: $DOWNLOAD_DIR"
 
 # ---------- Links file ----------
 while true; do
-    read -rp "Enter full path to links file: " LINKS_FILE
+    safe_read "Enter full path to links file: " LINKS_FILE
     LINKS_FILE="${LINKS_FILE/#\~/$HOME}"
     [ -f "$LINKS_FILE" ] && break
     error "Links file not found"
@@ -155,14 +189,14 @@ done
 TIME_REGEX='^([01]?[0-9]|2[0-3]):[0-5][0-9]$'
 
 while true; do
-    read -rp "Enter START time (HH:MM) [default: $DEFAULT_START_TIME]: " START_TIME
+    safe_read "Enter START time (HH:MM) [default: $DEFAULT_START_TIME]: " START_TIME
     START_TIME=${START_TIME:-$DEFAULT_START_TIME}
     [[ "$START_TIME" =~ $TIME_REGEX ]] && break
     error "Invalid START time format"
 done
 
 while true; do
-    read -rp "Enter END time (HH:MM) [default: $DEFAULT_END_TIME]: " END_TIME
+    safe_read "Enter END time (HH:MM) [default: $DEFAULT_END_TIME]: " END_TIME
     END_TIME=${END_TIME:-$DEFAULT_END_TIME}
     [[ "$END_TIME" =~ $TIME_REGEX ]] && break
     error "Invalid END time format"
@@ -192,12 +226,12 @@ start_prevent_sleep
 
 while [ "$sleep_seconds" -gt 0 ]; do
     check_internet_silent
-    sleep "$KEEP_ALIVE_INTERVAL"
+    safe_sleep "$KEEP_ALIVE_INTERVAL"
     sleep_seconds=$((sleep_seconds - KEEP_ALIVE_INTERVAL))
 done
 
 until check_internet_silent; do
-    sleep "$KEEP_ALIVE_INTERVAL"
+    safe_sleep "$KEEP_ALIVE_INTERVAL"
 done
 
 info "Download window opened"
@@ -209,7 +243,7 @@ while IFS= read -r url || [ -n "$url" ]; do
     [ "$(date +%s)" -ge "$end_ts" ] && break
 
     until check_internet_silent; do
-        sleep "$KEEP_ALIVE_INTERVAL"
+        safe_sleep "$KEEP_ALIVE_INTERVAL"
     done
 
     filename=$(basename "${url%%\?*}")
@@ -227,7 +261,7 @@ while IFS= read -r url || [ -n "$url" ]; do
         }
         warning "Retry $attempt failed"
         attempt=$((attempt + 1))
-        sleep 3
+        safe_sleep 3
     done
 done < "$LINKS_FILE"
 
